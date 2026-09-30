@@ -20,7 +20,9 @@ def main() -> None:
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
 
+    print("PumpkinSync is starting (the first launch draws the built-in pumpkin face; this takes a few seconds)…", flush=True)
     application = create_app(data_root=args.data, template_path=args.template)
+    print(f"PumpkinSync is ready at http://{'127.0.0.1' if args.host in {'0.0.0.0', '::'} else args.host}:{args.port}", flush=True)
     if not args.no_browser and args.host in {"127.0.0.1", "localhost"}:
         threading.Timer(1.1, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
     uvicorn.run(application, host=args.host, port=args.port, log_level="info")

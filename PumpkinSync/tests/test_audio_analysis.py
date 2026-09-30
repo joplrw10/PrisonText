@@ -63,3 +63,51 @@ def test_waveform_peaks_are_bounded_and_requested_length() -> None:
     assert min(peaks) >= 0.0
     assert max(peaks) <= 1.0
     assert max(peaks) == 1.0
+
+
+def test_continuous_speech_closes_the_mouth_between_syllables() -> None:
+    sample_rate = 16_000
+    t = np.arange(sample_rate * 3, dtype=np.float32) / sample_rate
+    # Four syllables per second that never drop to silence.
+    envelope = np.clip(np.sin(2 * np.pi * 4 * t), 0, None) ** 0.7 * 0.8 + 0.08
+    samples = envelope * np.sin(2 * np.pi * 170 * t) * ((t > 0.5) & (t < 2.5))
+
+    cues = analyze_waveform(samples, sample_rate)
+
+    validate_cues(cues, duration=3.0)
+    shapes = [cue.shape for cue in cues]
+    closures = sum(1 for shape in shapes[1:-1] if shape in {"A", "B"})
+    assert closures >= 3, shapes
+
+
+def test_song_mode_ignores_drums_outside_the_vocal_band() -> None:
+    sample_rate = 16_000
+    t = np.arange(sample_rate * 4, dtype=np.float32) / sample_rate
+    drums = np.zeros_like(t)
+    hit = np.arange(int(0.12 * sample_rate))
+    for beat in np.arange(0.0, 4.0, 0.5):
+        start = int(beat * sample_rate)
+        drums[start : start + hit.size] += 0.9 * np.exp(-hit / 800) * np.sin(2 * np.pi * 55 * hit / sample_rate)
+    vocal_region = (t > 1.2) & (t < 2.8)
+    mix = drums + 0.3 * np.sin(2 * np.pi * 300 * t) * vocal_region
+
+    song = analyze_waveform(mix, sample_rate, mode="song")
+
+    validate_cues(song, duration=4.0)
+    outside = sum(c.duration for c in song if c.shape != "X" and (c.end <= 1.2 or c.start >= 2.8))
+    inside = sum(max(0.0, min(c.end, 2.8) - max(c.start, 1.2)) for c in song if c.shape != "X")
+    assert outside < 0.1
+    assert inside > 1.0
+
+
+def test_long_audio_analysis_is_fast() -> None:
+    import time
+
+    sample_rate = 16_000
+    samples = np.random.default_rng(3).normal(0.0, 0.2, sample_rate * 300).astype(np.float32)
+
+    started = time.perf_counter()
+    cues = analyze_waveform(samples, sample_rate)
+
+    assert time.perf_counter() - started < 10.0
+    validate_cues(cues, duration=300.0)

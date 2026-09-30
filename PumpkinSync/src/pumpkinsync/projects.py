@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -54,11 +56,20 @@ class ProjectRecord:
     def exports_dir(self) -> Path:
         return self.root / "exports"
 
+    @property
+    def transcript_file(self) -> Path:
+        return self.root / "transcript.txt"
+
+    @property
+    def display_name(self) -> str:
+        return str(self.metadata.get("original_name") or self.source_file.name)
+
 
 class ProjectStore:
     def __init__(self, root: Path | str) -> None:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self._metadata_lock = threading.Lock()
 
     @staticmethod
     def _validate_id(project_id: str) -> str:
@@ -114,9 +125,7 @@ class ProjectStore:
             metadata=metadata,
         )
 
-    def list_projects(self, limit: int = 20) -> list[ProjectRecord]:
-        if not 1 <= limit <= 100:
-            raise ValueError("limit must be between 1 and 100")
+    def iter_projects(self) -> list[ProjectRecord]:
         records: list[ProjectRecord] = []
         for candidate in self.root.iterdir():
             if not candidate.is_dir() or not _PROJECT_ID.fullmatch(candidate.name):
@@ -129,7 +138,28 @@ class ProjectStore:
             key=lambda record: str(record.metadata.get("created_at", "")),
             reverse=True,
         )
-        return records[:limit]
+        return records
+
+    def list_projects(self, limit: int = 20) -> list[ProjectRecord]:
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        return self.iter_projects()[:limit]
+
+    def delete_project(self, project: ProjectRecord) -> None:
+        root = project.root.resolve()
+        if root.parent != self.root or not _PROJECT_ID.fullmatch(root.name):
+            raise ValueError("refusing to delete outside the project store")
+        shutil.rmtree(root)
+
+    def list_exports(self, project: ProjectRecord) -> list[Path]:
+        if not project.exports_dir.is_dir():
+            return []
+        files = [
+            path
+            for path in project.exports_dir.iterdir()
+            if path.is_file() and path.suffix.lower() == ".mp4" and not path.name.startswith(".")
+        ]
+        return sorted(files, key=lambda path: path.stat().st_mtime, reverse=True)
 
     def resolve_relative(self, project: ProjectRecord, relative_path: str | Path) -> Path:
         candidate = (project.root / Path(relative_path)).resolve()
@@ -153,7 +183,13 @@ class ProjectStore:
         return json.loads(target.read_text(encoding="utf-8"))
 
     def update_metadata(self, project: ProjectRecord, **updates: Any) -> ProjectRecord:
-        metadata = dict(project.metadata)
-        metadata.update(updates)
-        self.write_json(project, "project.json", metadata)
+        """Merge *updates* into project.json, re-reading it so concurrent edits survive."""
+
+        with self._metadata_lock:
+            try:
+                metadata = self.read_json(project, "project.json")
+            except (FileNotFoundError, json.JSONDecodeError):
+                metadata = dict(project.metadata)
+            metadata.update(updates)
+            self.write_json(project, "project.json", metadata)
         return ProjectRecord(project.id, project.root, project.source_file, metadata)

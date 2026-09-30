@@ -141,3 +141,27 @@ def validate_cues(cues: Iterable[Cue], duration: float, tolerance: float = 1e-3)
         raise ValueError("timeline must start at zero")
     if abs(values[-1].end - duration) > tolerance:
         raise ValueError("timeline must cover the full duration")
+
+
+def shift_cues(cues: Iterable[Cue], offset: float, duration: float) -> list[Cue]:
+    """Move every cue boundary *offset* seconds earlier (negative moves later).
+
+    Used for "mouth lead": animators usually open the mouth a frame or two
+    before the sound is heard so the picture reads as in sync.
+    """
+
+    values = [replace(cue) for cue in cues]
+    if not values or abs(offset) < 1e-9:
+        return values
+    shifted: list[Cue] = []
+    for cue in values:
+        start = min(duration, max(0.0, cue.start - offset))
+        end = min(duration, max(0.0, cue.end - offset))
+        if end - start > 1e-6:
+            shifted.append(Cue(start, end, cue.shape, cue.energy, cue.confidence))
+    if not shifted:
+        return [Cue(0.0, duration, values[0].shape, values[0].energy, values[0].confidence)]
+    # Whatever was pushed outside the timeline is covered by the nearest cue.
+    shifted[0].start = 0.0
+    shifted[-1].end = duration
+    return _compact_adjacent(shifted)

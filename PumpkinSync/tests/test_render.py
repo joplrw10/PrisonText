@@ -103,3 +103,41 @@ def test_render_project_creates_compatible_audio_video(tmp_path: Path) -> None:
     assert media.audio_sample_rate == 48_000
     assert media.audio_channels == 2
     assert abs(media.duration - 1.0) < 0.08
+
+
+def test_render_applies_mouth_lead_and_reports_progress(tmp_path: Path) -> None:
+    template = make_template(tmp_path / "template")
+    audio = tmp_path / "audio.wav"
+    sample_rate = 48_000
+    t = np.arange(sample_rate * 2, dtype=np.float32) / sample_rate
+    sf.write(audio, 0.2 * np.sin(2 * np.pi * 220 * t), sample_rate)
+    output = tmp_path / "exports" / "lead.mp4"
+    cues = [Cue(0.0, 1.0, "X"), Cue(1.0, 2.0, "D", energy=0.9)]
+    seen: list[float] = []
+
+    render_project(
+        audio_path=audio,
+        cues=cues,
+        template=template,
+        output_path=output,
+        width=320,
+        height=180,
+        preview=True,
+        lead_seconds=0.5,
+        on_progress=seen.append,
+    )
+
+    assert seen and seen[-1] == 1.0
+    assert [path.name for path in output.parent.iterdir()] == ["lead.mp4"]
+    frame = tmp_path / "frame.png"
+    import subprocess
+
+    # With a 0.5 s lead the open D mouth is already showing at 0.75 s.
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.75", "-i", str(output), "-frames:v", "1", str(frame)],
+        check=True,
+    )
+    shown = np.asarray(Image.open(frame).convert("L"), dtype=np.int16)
+    expected_d = np.asarray(Image.open(template.frames["D"]["wide"]["center"]).convert("L").resize((320, 180)), dtype=np.int16)
+    expected_x = np.asarray(Image.open(template.frames["X"]["normal"]["center"]).convert("L").resize((320, 180)), dtype=np.int16)
+    assert np.abs(shown - expected_d).mean() < np.abs(shown - expected_x).mean()

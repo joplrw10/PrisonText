@@ -7,9 +7,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .cues import merge_short_cues, validate_cues
 from .models import Cue, VALID_SHAPES
@@ -72,6 +74,63 @@ def ensure_ffmpeg() -> None:
         raise ExternalToolError("FFmpeg and FFprobe must both be available on PATH")
 
 
+def run_ffmpeg_with_progress(
+    arguments: Iterable[str | Path],
+    *,
+    duration: float,
+    on_progress: Callable[[float], None] | None = None,
+    timeout: float | None = None,
+) -> None:
+    """Run ``ffmpeg <arguments>`` and report 0..1 progress from its -progress feed."""
+
+    args = ["ffmpeg", "-progress", "pipe:1", "-nostats", *[str(part) for part in arguments]]
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as stderr:
+        try:
+            process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=stderr, text=True)
+        except FileNotFoundError as exc:
+            raise ExternalToolError("required executable was not found: ffmpeg") from exc
+        timed_out = threading.Event()
+        watchdog: threading.Timer | None = None
+        if timeout:
+            def _expire() -> None:
+                timed_out.set()
+                process.kill()
+
+            watchdog = threading.Timer(timeout, _expire)
+            watchdog.daemon = True
+            watchdog.start()
+        last_report = 0.0
+        try:
+            assert process.stdout is not None
+            for line in process.stdout:
+                key, _, value = line.strip().partition("=")
+                # out_time_ms is (despite its name) microseconds, like out_time_us.
+                if key in {"out_time_us", "out_time_ms"} and on_progress and duration > 0:
+                    try:
+                        seconds = int(value) / 1_000_000
+                    except ValueError:
+                        continue
+                    now = time.monotonic()
+                    if now - last_report > 0.2:
+                        last_report = now
+                        on_progress(max(0.0, min(1.0, seconds / duration)))
+            process.wait()
+        finally:
+            if watchdog:
+                watchdog.cancel()
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        if timed_out.is_set():
+            raise ExternalToolError("command timed out: ffmpeg")
+        if process.returncode != 0:
+            stderr.seek(0)
+            detail = stderr.read().strip() or "unknown error"
+            raise ExternalToolError(f"ffmpeg failed: {detail[-1200:]}")
+    if on_progress:
+        on_progress(1.0)
+
+
 def prepare_analysis_audio(source: Path, destination: Path, sample_rate: int = 16_000) -> Path:
     ensure_ffmpeg()
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -97,6 +156,19 @@ def prepare_analysis_audio(source: Path, destination: Path, sample_rate: int = 1
     )
     if not destination.is_file() or destination.stat().st_size < 44:
         raise ExternalToolError("FFmpeg did not create a usable analysis WAV")
+    return destination
+
+
+def prepare_playback_audio(source: Path, destination: Path) -> Path:
+    """Decode audio the browser may not support into a stereo 44.1 kHz WAV."""
+
+    ensure_ffmpeg()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source, "-vn",
+         "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", destination],
+        timeout=900,
+    )
     return destination
 
 
@@ -175,6 +247,73 @@ def parse_rhubarb_json(payload: dict[str, Any], duration: float) -> list[Cue]:
     return result
 
 
+def parse_cue_sheet(text: str, duration: float) -> list[Cue]:
+    """Read cues exported by PumpkinSync or Rhubarb (JSON or TSV).
+
+    Accepted forms: ``{"mouthCues": [...]}`` (Rhubarb JSON), ``{"cues": [...]}``
+    (PumpkinSync JSON), or tab/space separated ``start<TAB>shape`` lines
+    (Rhubarb TSV), where each cue ends where the next begins.
+    """
+
+    stripped = text.strip().lstrip("\ufeff")
+    if not stripped:
+        raise ValueError("the cue sheet is empty")
+    if stripped[0] in "{[":
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"the cue sheet is not valid JSON: {exc.msg}") from exc
+        if isinstance(payload, dict) and "mouthCues" in payload:
+            return parse_rhubarb_json(payload, duration)
+        raw = payload.get("cues") if isinstance(payload, dict) else payload
+        if not isinstance(raw, list):
+            raise ValueError("JSON cue sheets need a 'cues' or 'mouthCues' list")
+        try:
+            items = [
+                {"start": float(item["start"]), "end": float(item["end"]), "value": str(item.get("shape", item.get("value")))}
+                for item in raw
+            ]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("each JSON cue needs start, end and shape") from exc
+        return parse_rhubarb_json({"mouthCues": items}, duration)
+
+    rows: list[tuple[float, str]] = []
+    for number, line in enumerate(stripped.splitlines(), start=1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.replace(",", "\t").split()
+        if len(parts) < 2:
+            raise ValueError(f"line {number} needs a start time and a mouth shape")
+        try:
+            start = float(parts[0])
+        except ValueError as exc:
+            if number == 1:
+                continue  # header row
+            raise ValueError(f"line {number} has an invalid time {parts[0]!r}") from exc
+        rows.append((start, parts[1].upper()))
+    if not rows:
+        raise ValueError("the cue sheet contains no cues")
+    rows.sort(key=lambda row: row[0])
+    items = []
+    for index, (start, shape) in enumerate(rows):
+        end = rows[index + 1][0] if index + 1 < len(rows) else duration
+        if end > start:
+            items.append({"start": start, "end": end, "value": shape})
+    return parse_rhubarb_json({"mouthCues": items}, duration)
+
+
+def cues_to_tsv(cues: Iterable[Cue]) -> str:
+    """Rhubarb-compatible TSV: one ``start<TAB>shape`` line per cue."""
+
+    values = list(cues)
+    lines = [f"{cue.start:.3f}\t{cue.shape}" for cue in values]
+    if values:
+        # A closing rest line marks where the final cue ends.
+        lines.append(f"{values[-1].end:.3f}\tX")
+    return "\n".join(lines) + "\n"
+
+
 def find_rhubarb(explicit: Path | None = None, project_root: Path | None = None) -> Path | None:
     candidates: list[Path] = []
     if explicit:
@@ -204,17 +343,36 @@ def run_rhubarb(
     transcript_file: Path | None = None,
     executable: Path | None = None,
     project_root: Path | None = None,
+    recognizer: str | None = None,
 ) -> list[Cue]:
+    """Run Rhubarb and return a complete cue timeline.
+
+    ``recognizer`` may be ``"phonetic"`` (better for singing and non-English)
+    or ``"pocketSphinx"`` (English speech, uses the transcript). Older Rhubarb
+    builds without ``--recognizer`` are retried without the flag.
+    """
+
     binary = find_rhubarb(executable, project_root)
     if binary is None:
         raise ExternalToolError("Rhubarb Lip Sync was not found")
     with tempfile.TemporaryDirectory(prefix="pumpkinsync-rhubarb-") as temporary:
         output = Path(temporary) / "cues.json"
-        command: list[str | Path] = [binary, "-f", "json", "-o", output]
+        base: list[str | Path] = [binary, "-f", "json", "-o", output]
         if transcript_file and transcript_file.is_file():
-            command.extend(["--dialogFile", transcript_file])
-        command.append(audio_wav)
-        _run(command, timeout=900)
+            base.extend(["--dialogFile", transcript_file])
+        attempts = [base + ["--recognizer", recognizer] if recognizer else base]
+        if recognizer:
+            attempts.append(base)
+        last_error: ExternalToolError | None = None
+        for command in attempts:
+            try:
+                _run([*command, audio_wav], timeout=1800, cwd=binary.parent)
+                break
+            except ExternalToolError as exc:
+                last_error = exc
+        else:
+            assert last_error is not None
+            raise last_error
         payload = json.loads(output.read_text(encoding="utf-8"))
     return parse_rhubarb_json(payload, duration)
 
@@ -222,6 +380,10 @@ def run_rhubarb(
 def try_demucs_vocals(source: Path, work_dir: Path) -> tuple[Path | None, str | None]:
     """Return a vocal stem when optional Demucs is usable; otherwise a warning."""
 
+    cached = _latest_vocals(work_dir)
+    if cached is not None and cached.stat().st_mtime >= source.stat().st_mtime:
+        # Re-analysis reuses the stem; separation is by far the slowest step.
+        return cached, None
     if importlib.util.find_spec("demucs") is None:
         return None, "Demucs is not installed; analyzed the original audio instead."
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -241,7 +403,14 @@ def try_demucs_vocals(source: Path, work_dir: Path) -> tuple[Path | None, str | 
         )
     except ExternalToolError as exc:
         return None, f"Vocal isolation failed; analyzed the original audio instead. {exc}"
-    candidates = sorted(work_dir.rglob("vocals.wav"), key=lambda item: item.stat().st_mtime, reverse=True)
-    if not candidates:
+    vocals = _latest_vocals(work_dir)
+    if vocals is None:
         return None, "Demucs finished without producing vocals.wav; analyzed the original audio instead."
-    return candidates[0], None
+    return vocals, None
+
+
+def _latest_vocals(work_dir: Path) -> Path | None:
+    if not work_dir.is_dir():
+        return None
+    candidates = sorted(work_dir.rglob("vocals.wav"), key=lambda item: item.stat().st_mtime, reverse=True)
+    return candidates[0] if candidates else None
