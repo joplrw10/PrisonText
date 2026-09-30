@@ -168,6 +168,45 @@ def _syllable_closures(
     return closures
 
 
+def _unify_syllables(
+    labels: list[str],
+    energies: np.ndarray,
+    voiced: np.ndarray,
+    closures: dict[int, str],
+    hop_seconds: float,
+    max_syllable_seconds: float = 0.35,
+) -> list[str]:
+    """Give each short syllable nucleus the shape of its loudest frame.
+
+    Frame-by-frame labels flicker between neighbouring vowel shapes while a
+    syllable swells and fades; those slivers are then swallowed by the
+    closures around them and the mouth barely opens. One shape per syllable
+    reads far better on a projected face. Longer runs (held notes, slow
+    speech) keep their frame-level variety.
+    """
+
+    result = list(labels)
+    limit = max(1, int(round(max_syllable_seconds / hop_seconds)))
+    index = 0
+    total = len(labels)
+    while index < total:
+        if not voiced[index] or index in closures:
+            index += 1
+            continue
+        end = index
+        while end + 1 < total and voiced[end + 1] and (end + 1) not in closures:
+            end += 1
+        if end - index + 1 <= limit:
+            peak = index + int(np.argmax(energies[index : end + 1]))
+            shape = labels[peak]
+            if shape in {"A", "X"}:
+                shape = "C"
+            for position in range(index, end + 1):
+                result[position] = shape
+        index = end + 1
+    return result
+
+
 def analyze_waveform(
     samples: np.ndarray,
     sample_rate: int,
@@ -231,12 +270,15 @@ def analyze_waveform(
         elif index in closures:
             shape = closures[index]
         else:
-            onset = energy - float(energies[max(0, index - onset_span)])
+            earlier = float(energies[max(0, index - onset_span)])
             centroid_hz = float(centroid[index])
             consonant_like = high_ratio[index] > 0.34 or zcr[index] > 0.19
             rounded = low_ratio[index] > 0.58 or centroid_hz < 720.0
 
-            if onset > 0.28 and energy < 0.72:
+            # A sharp burst out of near-silence reads as a plosive (P/B/M)
+            # release. Ordinary syllable rises are left to open the mouth;
+            # the closures between syllables come from _syllable_closures.
+            if earlier < 0.12 and energy - earlier > 0.28 and energy < 0.72:
                 shape = "A"
             elif consonant_like:
                 shape = "H" if energy > 0.68 else "G" if energy > 0.36 else "B"
@@ -259,6 +301,7 @@ def analyze_waveform(
                 shape = "B"
         labels.append(shape)
 
+    labels = _unify_syllables(labels, energies, voiced, closures, actual_hop)
     cues = _labels_to_cues(labels, energies, actual_hop, duration)
     cues = merge_short_cues(cues, min_duration=min_cue_seconds)
     # Rounding at serialization time preserves the exact total duration here.

@@ -69,3 +69,18 @@ def test_optional_rhubarb_installers_use_the_official_release_api() -> None:
     assert "releases/latest" in linux
     assert "install_rhubarb_windows.ps1" in readme
     assert "install_rhubarb_linux.sh" in readme
+
+
+def test_private_templates_and_tool_downloads_are_never_committed() -> None:
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+    assert "src/pumpkinsync/private_template/" in ignored
+    assert "templates/" in ignored
+    assert "data/" in ignored
+    assert "tools/rhubarb/*" in ignored
+
+
+def test_docker_healthcheck_allows_first_run_template_drawing() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "--start-period=60s" in dockerfile

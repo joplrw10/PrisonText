@@ -77,7 +77,11 @@ def test_continuous_speech_closes_the_mouth_between_syllables() -> None:
     validate_cues(cues, duration=3.0)
     shapes = [cue.shape for cue in cues]
     closures = sum(1 for shape in shapes[1:-1] if shape in {"A", "B"})
-    assert closures >= 3, shapes
+    openings = sum(1 for shape in shapes[1:-1] if shape in {"C", "D", "E"})
+    # Eight syllables: the mouth should visibly open and close for most of them.
+    assert closures >= 5, shapes
+    assert openings >= 6, shapes
+    assert max(cue.duration for cue in cues[1:-1]) < 0.4, shapes
 
 
 def test_song_mode_ignores_drums_outside_the_vocal_band() -> None:
