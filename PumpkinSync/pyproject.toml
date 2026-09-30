@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pumpkinsync"
+version = "0.2.0"
+description = "Local audio-to-lip-sync editor and projector-ready video exporter"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "PumpkinSync contributors" }]
+dependencies = [
+  "fastapi>=0.110,<1",
+  "uvicorn[standard]>=0.29,<1",
+  "python-multipart>=0.0.9,<1",
+  "numpy>=1.26,<3",
+  "scipy>=1.12,<2",
+  "soundfile>=0.12,<1",
+  "Pillow>=10,<13",
+]
+
+[project.optional-dependencies]
+songs = [
+  "demucs>=4,<5",
+  "torch>=2.1",
+]
+dev = [
+  "pytest>=8,<10",
+  "httpx>=0.27,<1",
+]
+template-builder = [
+  "opencv-python-headless>=4.9,<5",
+]
+
+[project.scripts]
+pumpkinsync = "pumpkinsync.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pumpkinsync = [
+  "static/*",
+  "private_template/*.json",
+  "private_template/*.jpg",
+  "private_template/frames/*.png",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

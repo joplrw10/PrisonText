@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PumpkinSync</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='36' rx='28' ry='24' fill='%23ff7a18'/%3E%3Crect x='29' y='4' width='6' height='12' rx='2' fill='%234b7a2a'/%3E%3Cpath d='M16 30l7-9 7 9zM34 30l7-9 7 9zM18 42q14 10 28 0l-4 6q-10 6-20 0z' fill='%23120700'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <header class="site-header">
+    <div class="brand-mark" aria-hidden="true">◉</div>
+    <div>
+      <h1>PumpkinSync</h1>
+      <p>Local audio-to-performance editor</p>
+    </div>
+    <button id="capabilityBadge" class="status-pill" type="button" aria-expanded="false" aria-controls="healthPanel">Checking local tools…</button>
+  </header>
+
+  <section id="healthPanel" class="health-panel hidden" aria-label="Local tool status"></section>
+  <div id="ffmpegBanner" class="banner danger hidden" role="alert">
+    <strong>FFmpeg was not found.</strong> Analysis and export need FFmpeg and FFprobe on the PATH. On Windows, run <code>setup_windows.ps1</code> again; on Linux, install the <code>ffmpeg</code> package. Then restart PumpkinSync.
+  </div>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">PRIVATE · LOCAL · PROJECTOR READY</p>
+        <h2>Turn a song or skit into a synchronized pumpkin performance.</h2>
+        <p class="lede">Your audio stays on this computer. Analyze it, fix any mouth cue with one keystroke, and export a 1080p MP4 with the original sound, ready for your projector.</p>
+      </div>
+      <div class="hero-orbit" aria-hidden="true">
+        <img id="heroPreview" alt="">
+      </div>
+    </section>
+
+    <section class="card import-card" id="importCard">
+      <div class="section-heading">
+        <span class="step">1</span>
+        <div><h3>Choose the audio</h3><p>MP3, WAV, M4A, AAC, FLAC, OGG, OPUS, AIFF, or a video's soundtrack (MP4, MOV, WEBM, MKV).</p></div>
+      </div>
+      <form id="uploadForm">
+        <label class="drop-zone" id="dropZone">
+          <input id="audioFile" name="audio" type="file" accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.aif,.aiff,.wma,.mp4,.m4v,.mov,.webm,.mkv" required>
+          <span class="drop-icon">＋</span>
+          <strong id="fileLabel">Drop an audio file here</strong>
+          <small>or click to browse</small>
+        </label>
+
+        <div class="form-grid">
+          <fieldset>
+            <legend>Performance type</legend>
+            <div class="segmented">
+              <label><input type="radio" name="mode" value="skit" checked><span>Skit / dialogue</span></label>
+              <label><input type="radio" name="mode" value="song"><span>Song</span></label>
+            </div>
+          </fieldset>
+          <label class="field">Face template
+            <select id="templateSelect" name="template_id"></select>
+          </label>
+          <label class="field">Analyzer
+            <select id="analyzer" name="analyzer">
+              <option value="auto">Auto — Rhubarb when available</option>
+              <option value="builtin">Built-in — no download</option>
+              <option value="rhubarb">Rhubarb only</option>
+            </select>
+          </label>
+          <label class="field">Mouth intensity <output id="intensityValue">1.00×</output>
+            <input id="intensity" name="intensity" type="range" min="0.4" max="1.8" step="0.05" value="1.0">
+          </label>
+          <label class="check-field wide" id="vocalOption">
+            <input id="separateVocals" name="separate_vocals" type="checkbox" value="true">
+            <span><strong>Isolate vocals for analysis</strong><small>Song mode only. Uses Demucs when installed; the original mix is still used in the export.</small></span>
+          </label>
+        </div>
+
+        <details class="transcript-panel">
+          <summary>Add lyrics or a script (improves Rhubarb timing)</summary>
+          <textarea id="transcript" name="transcript" rows="5" placeholder="Optional. Paste the spoken script or lyrics here. It stays in the local project folder."></textarea>
+        </details>
+
+        <button class="primary-button" id="analyzeButton" type="submit">Analyze performance</button>
+        <div class="progress hidden" id="uploadProgress"><div class="progress-bar"></div></div>
+        <div id="uploadStatus" class="inline-status" role="status"></div>
+      </form>
+    </section>
+
+    <section class="recent-panel" id="recentSection">
+      <div class="recent-heading">
+        <div><p class="eyebrow">SAVED LOCALLY</p><h3>Recent projects</h3></div>
+        <button id="refreshProjects" type="button" class="text-button">Refresh</button>
+      </div>
+      <div id="recentProjects" class="recent-projects"><p class="empty-recent">No analyzed projects yet.</p></div>
+    </section>
+
+    <section id="workspace" class="workspace hidden" aria-label="Project editor">
+      <div class="workspace-title">
+        <div>
+          <p class="eyebrow">EDITING</p>
+          <h3 id="projectTitle">Project</h3>
+          <p id="projectMeta" class="muted"></p>
+        </div>
+        <button id="closeProject" type="button" class="text-button">Close project</button>
+      </div>
+      <div id="projectNotice" class="banner hidden" role="status"></div>
+
+      <div class="card preview-card">
+        <div class="section-heading compact">
+          <span class="step">2</span>
+          <div><h3>Preview and correct</h3><p>Click the waveform to jump, drag a cue edge to retime it, and press A–H / X to change the selected mouth.</p></div>
+        </div>
+        <div class="performance-stage" id="stage">
+          <img id="facePreview" alt="Animated face preview">
+          <div class="stage-shape" id="stageShape">X</div>
+          <div class="stage-time"><span id="currentTime">0:00.00</span><span id="durationLabel">0:00.00</span></div>
+          <div class="stage-overlay hidden" id="stageOverlay">
+            <strong id="stageOverlayTitle">Analyzing…</strong>
+            <div class="progress"><div class="progress-bar"></div></div>
+            <span id="stageOverlayMessage"></span>
+          </div>
+        </div>
+        <audio id="audioPlayer" preload="auto"></audio>
+        <div class="transport">
+          <button id="playButton" type="button" class="primary-button play-button" aria-label="Play">▶</button>
+          <button id="backButton" type="button" class="secondary-button icon-button" title="Back 2 seconds">↺ 2s</button>
+          <label class="compact-field">Speed
+            <select id="speedSelect">
+              <option value="0.5">0.5×</option>
+              <option value="0.75">0.75×</option>
+              <option value="1" selected>1×</option>
+            </select>
+          </label>
+          <label class="compact-field grow">Zoom
+            <input id="zoomRange" type="range" min="0" max="6" step="0.25" value="0">
+          </label>
+          <label class="compact-check"><input id="followPlayhead" type="checkbox" checked> Follow</label>
+        </div>
+        <canvas id="waveform" height="180" aria-label="Audio waveform and cue timeline"></canvas>
+        <div class="playback-row">
+          <button id="previousCue" type="button" class="secondary-button">← Prev</button>
+          <button id="nextCue" type="button" class="secondary-button">Next →</button>
+          <button id="splitCue" type="button" class="secondary-button" title="Split the cue under the playhead (S)">Split <kbd>S</kbd></button>
+          <button id="mergeCue" type="button" class="secondary-button" title="Merge the selected cue with the next (M)">Merge <kbd>M</kbd></button>
+          <button id="undoButton" type="button" class="secondary-button" title="Undo (Ctrl+Z)">Undo</button>
+          <button id="redoButton" type="button" class="secondary-button" title="Redo (Ctrl+Shift+Z)">Redo</button>
+          <span id="saveStatus" class="save-state">Saved</span>
+        </div>
+      </div>
+
+      <aside class="card cue-card">
+        <p class="eyebrow">SELECTED CUE</p>
+        <div class="cue-readout"><strong id="selectedShape">X</strong><span id="selectedRange">0.00–0.00 s</span></div>
+        <div id="shapeGrid" class="shape-grid"></div>
+        <div class="shape-help" id="shapeHelp">Rest / silence</div>
+        <div class="nudge-row">
+          <span>Start</span>
+          <button id="nudgeEarlier" type="button" class="secondary-button small" title="Move the cue start one frame earlier (Shift+←)">−1 frame</button>
+          <button id="nudgeLater" type="button" class="secondary-button small" title="Move the cue start one frame later (Shift+→)">+1 frame</button>
+        </div>
+        <details class="keyboard-note" id="keyboardHelp">
+          <summary>Keyboard shortcuts <kbd>?</kbd></summary>
+          <dl>
+            <dt><kbd>A</kbd>–<kbd>H</kbd>, <kbd>X</kbd></dt><dd>Set the mouth shape</dd>
+            <dt><kbd>Space</kbd></dt><dd>Play / pause</dd>
+            <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Previous / next cue</dd>
+            <dt><kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd></dt><dd>Nudge cue start by one frame</dd>
+            <dt><kbd>S</kbd></dt><dd>Split at the playhead</dd>
+            <dt><kbd>M</kbd></dt><dd>Merge with the next cue</dd>
+            <dt><kbd>Del</kbd></dt><dd>Remove cue (merge into previous)</dd>
+            <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></dt><dd>Undo / redo</dd>
+            <dt><kbd>+</kbd> <kbd>−</kbd></dt><dd>Zoom the waveform</dd>
+          </dl>
+        </details>
+      </aside>
+
+      <div class="card settings-card">
+        <div class="timeline-header"><h3>Project settings</h3></div>
+        <div class="settings-grid">
+          <label class="field">Face template
+            <select id="projectTemplate"></select>
+          </label>
+          <label class="field">Mouth lead <output id="leadValue">0 ms</output>
+            <input id="leadRange" type="range" min="-100" max="200" step="10" value="0">
+            <small class="field-help">Shows each mouth shape slightly before its sound. 30–70 ms often reads as tighter sync on a projector.</small>
+          </label>
+        </div>
+        <details class="reanalyze-panel" id="reanalyzePanel">
+          <summary>Re-run analysis with different settings</summary>
+          <div class="settings-grid">
+            <label class="field">Performance type
+              <select id="reMode"><option value="skit">Skit / dialogue</option><option value="song">Song</option></select>
+            </label>
+            <label class="field">Analyzer
+              <select id="reAnalyzer">
+                <option value="auto">Auto — Rhubarb when available</option>
+                <option value="builtin">Built-in</option>
+                <option value="rhubarb">Rhubarb only</option>
+              </select>
+            </label>
+            <label class="field">Mouth intensity <output id="reIntensityValue">1.00×</output>
+              <input id="reIntensity" type="range" min="0.4" max="1.8" step="0.05" value="1.0">
+            </label>
+            <label class="check-field" id="reVocalOption">
+              <input id="reSeparateVocals" type="checkbox">
+              <span><strong>Isolate vocals</strong><small>Song mode, Demucs</small></span>
+            </label>
+          </div>
+          <textarea id="reTranscript" rows="4" placeholder="Optional script or lyrics"></textarea>
+          <button id="reanalyzeButton" type="button" class="secondary-button">Re-analyze (replaces current cues)</button>
+        </details>
+      </div>
+
+      <div class="card timeline-card">
+        <div class="timeline-header"><h3>Cue timeline</h3><span id="cueCount"></span></div>
+        <div class="timeline-scroll"><table><thead><tr><th>#</th><th>Time</th><th>Shape</th><th>Energy</th></tr></thead><tbody id="cueTable"></tbody></table></div>
+      </div>
+
+      <div class="card export-card">
+        <div class="section-heading compact">
+          <span class="step">3</span>
+          <div><h3>Export the performance</h3><p>The MP4 includes your original audio and can be imported into your projection software or played directly.</p></div>
+        </div>
+        <div class="export-actions">
+          <button id="previewExport" type="button" class="secondary-button">Quick 540p proof</button>
+          <button id="fullExport" type="button" class="primary-button">Create 1080p MP4</button>
+        </div>
+        <div class="progress hidden" id="exportProgress"><div class="progress-bar"></div></div>
+        <div id="exportStatus" class="export-status" role="status"></div>
+        <ul id="exportList" class="export-list"></ul>
+        <details class="cuesheet-panel">
+          <summary>Cue sheet (Rhubarb-compatible)</summary>
+          <p class="muted">Download the timeline to use elsewhere, or import cues made with Rhubarb or another PumpkinSync project.</p>
+          <div class="export-actions">
+            <a id="downloadTsv" class="secondary-button" download>Download TSV</a>
+            <a id="downloadJson" class="secondary-button" download>Download JSON</a>
+            <label class="secondary-button file-button">Import cue sheet…<input id="importCues" type="file" accept=".tsv,.txt,.json,.csv"></label>
+          </div>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <footer>Personal-use companion tool · no cloud upload · no telemetry</footer>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

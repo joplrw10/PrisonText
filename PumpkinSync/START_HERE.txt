@@ -1,0 +1,47 @@
+PUMPKINSYNC — START HERE
+========================
+
+Windows (recommended first launch)
+----------------------------------
+1. Extract the entire PumpkinSync folder. Do not run it from inside the ZIP.
+2. Install Python 3.11 or 3.12 if Python is not already installed.
+3. Right-click setup_windows.ps1 and choose "Run with PowerShell".
+   PowerShell command: powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1
+4. Optional but recommended for clearer word-shaped mouth timing:
+   powershell -ExecutionPolicy Bypass -File .\install_rhubarb_windows.ps1
+5. Optional: to use your private Trick face, copy your private_template folder
+   into src\pumpkinsync\private_template\ (it is never committed to git).
+   Without it, PumpkinSync uses its built-in jack-o'-lantern face.
+6. Double-click run_windows.bat.
+7. Drag in a song or skit, analyze it, review/correct the mouth cues, and export.
+
+For song vocal isolation, run this instead during setup:
+  powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1 -WithDemucs
+
+The editor opens locally at:
+  http://127.0.0.1:8765
+
+Unraid / Docker
+---------------
+From this folder:
+  docker compose up -d --build
+
+Then open:
+  http://YOUR_UNRAID_IP:8765
+
+Custom or private face templates go in ./data/templates/<name>/template.json.
+
+Editing tips
+------------
+- A-H / X change the selected mouth. Space plays and pauses.
+- Drag a cue edge on the waveform to retime it. S splits, M merges, Ctrl+Z undoes.
+- Mouth lead (Project settings) shows each shape slightly early for projectors.
+
+Notes
+-----
+- The built-in analyzer works without Rhubarb or Demucs.
+- Rhubarb improves phoneme-oriented timing, especially when you paste lyrics or a script.
+- Demucs helps keep instruments from driving the mouth during songs.
+- The original uploaded audio is used in the final MP4.
+- Projects and exports are stored locally under the data folder.
+- See README.md for the complete guide and troubleshooting.

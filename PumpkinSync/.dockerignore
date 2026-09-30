@@ -1,0 +1,17 @@
+.git
+.worktrees
+.venv
+__pycache__
+.pytest_cache
+*.pyc
+data
+exports
+build
+dist
+*.egg-info
+source
+*.zip
+*.mp4
+*.mp3
+*.m4a
+*.pdf
