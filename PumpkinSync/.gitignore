@@ -1,0 +1,22 @@
+.worktrees/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+data/
+exports/
+*.log
+.DS_Store
+
+# Private, user-specific face templates are never committed (see USER_MEDIA_NOTICE.md).
+src/pumpkinsync/private_template/
+templates/
+
+# Optional Rhubarb install lands here; keep only the README.
+tools/rhubarb/*
+!tools/rhubarb/README.md

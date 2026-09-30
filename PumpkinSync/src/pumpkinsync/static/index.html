@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PumpkinSync</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <header class="site-header">
+    <div class="brand-mark" aria-hidden="true">◉</div>
+    <div>
+      <h1>PumpkinSync</h1>
+      <p>Local audio-to-performance editor</p>
+    </div>
+    <div id="capabilityBadge" class="status-pill">Checking local tools…</div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">PRIVATE · LOCAL · PROJECTOR READY</p>
+        <h2>Turn a song or skit into a synchronized Trick performance.</h2>
+        <p class="lede">Your audio stays on this computer. Analyze it, correct any mouth cue with one keystroke, and export a 1080p MP4 containing the original sound.</p>
+      </div>
+      <div class="hero-orbit" aria-hidden="true">
+        <img src="/template/preview.jpg" alt="">
+      </div>
+    </section>
+
+    <section class="card import-card" id="importCard">
+      <div class="section-heading">
+        <span class="step">1</span>
+        <div><h3>Choose the audio</h3><p>MP3, WAV, M4A, AAC, FLAC, OGG, or OPUS.</p></div>
+      </div>
+      <form id="uploadForm">
+        <label class="drop-zone" id="dropZone">
+          <input id="audioFile" name="audio" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus" required>
+          <span class="drop-icon">＋</span>
+          <strong id="fileLabel">Drop an audio file here</strong>
+          <small>or click to browse</small>
+        </label>
+
+        <div class="form-grid">
+          <fieldset>
+            <legend>Performance type</legend>
+            <div class="segmented">
+              <label><input type="radio" name="mode" value="skit" checked><span>Skit / dialogue</span></label>
+              <label><input type="radio" name="mode" value="song"><span>Song</span></label>
+            </div>
+          </fieldset>
+          <label class="field">Analyzer
+            <select id="analyzer" name="analyzer">
+              <option value="auto">Auto — Rhubarb when available</option>
+              <option value="builtin">Built-in — no download</option>
+              <option value="rhubarb">Rhubarb only</option>
+            </select>
+          </label>
+          <label class="field">Mouth intensity <output id="intensityValue">1.00×</output>
+            <input id="intensity" name="intensity" type="range" min="0.4" max="1.8" step="0.05" value="1.0">
+          </label>
+          <label class="check-field" id="vocalOption">
+            <input id="separateVocals" name="separate_vocals" type="checkbox" value="true">
+            <span><strong>Isolate vocals for analysis</strong><small>Optional Demucs pass. The original mix is still used in the export.</small></span>
+          </label>
+        </div>
+
+        <details class="transcript-panel">
+          <summary>Add lyrics or a script for Rhubarb</summary>
+          <textarea id="transcript" name="transcript" rows="5" placeholder="Optional. Paste the spoken script or lyrics here."></textarea>
+        </details>
+
+        <button class="primary-button" id="analyzeButton" type="submit">Analyze performance</button>
+        <div id="uploadStatus" class="inline-status" role="status"></div>
+      </form>
+    </section>
+
+    <section class="recent-panel" id="recentSection">
+      <div class="recent-heading">
+        <div><p class="eyebrow">SAVED LOCALLY</p><h3>Recent projects</h3></div>
+        <button id="refreshProjects" type="button" class="text-button">Refresh</button>
+      </div>
+      <div id="recentProjects" class="recent-projects"><p class="empty-recent">No analyzed projects yet.</p></div>
+    </section>
+
+    <section id="workspace" class="workspace hidden">
+      <div class="card preview-card">
+        <div class="section-heading compact">
+          <span class="step">2</span>
+          <div><h3>Preview and correct</h3><p>Click the waveform or press A–H / X to replace the selected mouth cue.</p></div>
+        </div>
+        <div class="performance-stage">
+          <img id="facePreview" alt="Animated face preview">
+          <div class="stage-time"><span id="currentTime">0:00.00</span><span id="durationLabel">0:00.00</span></div>
+        </div>
+        <audio id="audioPlayer" controls preload="metadata"></audio>
+        <canvas id="waveform" height="150" aria-label="Audio waveform and cue timeline"></canvas>
+        <div class="playback-row">
+          <button id="previousCue" type="button" class="secondary-button">← Previous cue</button>
+          <button id="nextCue" type="button" class="secondary-button">Next cue →</button>
+          <span id="saveStatus" class="save-state">Saved</span>
+        </div>
+      </div>
+
+      <aside class="card cue-card">
+        <p class="eyebrow">SELECTED CUE</p>
+        <div class="cue-readout"><strong id="selectedShape">X</strong><span id="selectedRange">0.00–0.00 s</span></div>
+        <div id="shapeGrid" class="shape-grid"></div>
+        <div class="shape-help" id="shapeHelp">Rest / silence</div>
+        <div class="keyboard-note"><kbd>A</kbd>–<kbd>H</kbd> or <kbd>X</kbd> changes the selected cue.</div>
+      </aside>
+
+      <div class="card timeline-card">
+        <div class="timeline-header"><h3>Cue timeline</h3><span id="cueCount"></span></div>
+        <div class="timeline-scroll"><table><thead><tr><th>#</th><th>Time</th><th>Shape</th><th>Energy</th></tr></thead><tbody id="cueTable"></tbody></table></div>
+      </div>
+
+      <div class="card export-card">
+        <div class="section-heading compact">
+          <span class="step">3</span>
+          <div><h3>Export the performance</h3><p>The MP4 includes your original audio and can be imported into Spooky Studio or played directly.</p></div>
+        </div>
+        <div class="export-actions">
+          <button id="previewExport" type="button" class="secondary-button">Quick 540p proof</button>
+          <button id="fullExport" type="button" class="primary-button">Create 1080p MP4</button>
+        </div>
+        <div id="exportStatus" class="export-status"></div>
+        <a id="downloadLink" class="download-link hidden">Download finished MP4</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>Personal-use companion tool · no cloud upload · no telemetry</footer>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
